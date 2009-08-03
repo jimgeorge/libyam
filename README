@@ -1,0 +1,19 @@
+This is the "Yet Another Modbus" library, or libyam. It is a Modbus/RTU master
+library, using termios to access a serial device. It can issue Modbus/RTU
+command packets, and interpret the results.
+
+The packets are formed according to the documentation available at the Modbus
+IDA website.
+
+http://www.Modbus-IDA.org
+
+Currently, the following types of packets are allowed:
+Read Multiple Registers
+Read Multiple Inputs
+Write Single Coil
+Write Single Register
+Read Exception Status
+Write Multiple Coils
+Write Multiple Registers
+Report Slave ID
+
