@@ -8,6 +8,7 @@ received packets. Actual serial I/O is handled in the serial.c module.
 */
 
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 #include <termios.h>
 #include <stdint.h>
@@ -166,6 +167,35 @@ void yam_debug(struct yam_modbus *bus, int debug_status)
 }
 
 /**
+\brief Set the timeout value
+\param *bus The YAM object representing the Modbus
+\param timeout_ms New timeout, in milliseconds
+
+Changes the timeout value, after which any modbus serial device access times
+out.
+*/
+void yam_set_timeout(struct yam_modbus *bus, int timeout_ms)
+{
+	assert(bus != NULL);
+	bus->timeout_ms = timeout_ms;
+}
+
+/**
+\brief Get the serial device handler
+\param *bus The YAM object representing the Modbus
+\return File handle of the serial device associated with the YAM object
+
+Returns the file handle of the serial device associated with the YAM object.
+If no serial device is associated with the YAM object (ie, yam_modbus_init has
+not been called), the return value is undefined.
+*/
+int yam_get_serial_device(struct yam_modbus *bus)
+{
+	assert(bus != NULL);
+	return bus->serial;
+}
+
+/**
 \brief Send generic Modbus/RTU packet to the specified address
 \param *bus The YAM object representing the Modbus
 \param addr Address of the target Modbus device
@@ -193,13 +223,13 @@ void yam_send_generic_packet(struct yam_modbus *bus, uint8_t addr,
 	adu[adu_len++] = crc & 0x00FF;
 
 	if (bus->debug) {
-		printf("Generic send packet to %02X: CRC = %04X, "
+		fprintf(stderr, "Generic send packet to %02X: CRC = %04X, "
 			"PDU: %d bytes, ADU: %d bytes\n", addr, crc, pdu_len, adu_len);
 		int ctr;
 		for (ctr = 0; ctr < pdu_len + 3; ctr++) {
-			printf("[%.2X]", adu[ctr]);
+			fprintf(stderr, "[%.2X]", adu[ctr]);
 		}
-		printf("\n");
+		fprintf(stderr, "\n");
 	}
 	write(bus->serial, adu, adu_len);
 }
@@ -252,7 +282,7 @@ int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
 		if (bus->debug) {
 			int ctr;
 			for (ctr = 0; ctr < bytes_read; ctr++) {
-				printf("<%.2X>", adu[adu_len + ctr]);
+				fprintf(stderr, "<%.2X>", adu[adu_len + ctr]);
 			}
 		}
 		bytes_to_read -= bytes_read;
@@ -356,7 +386,7 @@ int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
 	} while ((state != DONE) && (state != ERROR));
 	
 	if (bus->debug) {
-		printf("\nadu_len = %d\n", adu_len);
+		fprintf(stderr, "\nadu_len = %d\n", adu_len);
 	}
 
 	/* Check to see if we encountered any errors during receive */
@@ -435,7 +465,7 @@ void yam_perror(struct yam_modbus *bus, char *s)
 {
 	assert(bus != NULL);
 	
-	printf("%s: %s\n", s, yam_strerror(bus->last_errorcode));
+	fprintf(stderr, "%s: %s\n", s, yam_strerror(bus->last_errorcode));
 }
 
 /**
