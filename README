@@ -17,3 +17,13 @@ Write Multiple Coils
 Write Multiple Registers
 Report Slave ID
 
+Note for 64-bit users
+---------------------
+libtool for 64-bit distros such as Fedora 14 that store 32 and 64 bit libraries
+in /usr/lib and /usr/lib64 don't seem to "do the right thing" and choose /usr/lib64
+even if --prefix to the configure script is set to /usr. The workaround is to
+issue
+
+./configure --prefix=/usr --libdir=/usr/lib64
+
+This puts everything into the right place
