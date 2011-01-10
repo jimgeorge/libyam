@@ -5,12 +5,16 @@
 */
 
 #include <unistd.h>
+#include <stdio.h>
+#include <strings.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <linux/serial.h>
+#include <errno.h>
 #include "serial.h"
 
 #define SERIAL_PORT_SPD_TBL_MAX 18
@@ -80,7 +84,6 @@ int serial_port_init(const char *device_name,
 	
 	*port = open(device_name, O_RDWR | O_NOCTTY);
 	if (*port < 0) {
-		perror("open");
 		return -1;
 	}
 	
@@ -108,7 +111,7 @@ int serial_port_init(const char *device_name,
 	term_st.c_oflag &= ~OPOST;
 	
 	/* Don't own the terminal (^C won't kill us), Enable rcv, Drop DTR on close */
-	term_st.c_cflag |= (CLOCAL | CREAD | HUPCL);
+	term_st.c_cflag |= (CREAD | HUPCL);
 	
 	/* Set 8-bit port size */
 	term_st.c_cflag &= ~CSIZE; term_st.c_cflag |= CS8;
