@@ -1,0 +1,5 @@
+2011-01-01 Jim George <jimgeorge@gmail.com>
+Release: 0.2
+	* Fixed various mistakes in config files that pointed to old stuff
+	* Added functions to return the serial device and to set timeout
+

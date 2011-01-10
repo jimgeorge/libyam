@@ -1,6 +1,6 @@
-dnl Autoconf script for libmbus
+dnl Autoconf script for libyam
 
-AC_INIT(libmbus, 0.1, jgeorge@engr.colostate.edu)
+AC_INIT(libyam, 0.2, jgeorge@engr.colostate.edu)
 AC_CONFIG_SRCDIR([yam/modbus.c])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE
