@@ -23,6 +23,7 @@ AC_OUTPUT([
 	Makefile
 	yam/Makefile
 	tests/Makefile
+	Doxyfile
 	yam.pc
 ])
 
