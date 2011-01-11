@@ -11,6 +11,14 @@
 
 #define YAM_MAX_DEVICE_NAME 64
 
+/**
+\brief The YAM object
+
+This structure represents the YAM object. One may be created using the
+yam_modbus_init function. All calls to the YAM library require a YAM object,
+to know which modbus serial device to use. This permits multiple serial
+devices to be open simultaneously.
+*/
 struct yam_modbus {
 	int serial; /**< Serial port file descriptor */
 	int baudrate; /**< Baud rate */
@@ -38,26 +46,44 @@ struct yam_modbus {
 #define YAM_REPORTSLAVEID 0x11
 
 /* MODBUS Exception codes */
+/** Return code - slave does not respond to specified function code */
 #define YAM_ILLEGAL_FUNCTION -1
+/** Return code - slave reports invalid address */
 #define YAM_ILLEGAL_DATA_ADDR -2
+/** Return code - slave reports that value written to register is invalid */
 #define YAM_ILLEGAL_DATA_VALUE -3
+/** Return code - slave reports a general failure */
 #define YAM_SLAVE_FAILURE -4
+/** Return code - slave acknowledges the request but did not process it */
 #define YAM_ACKNOWLEDGE -5
+/** Return code - slave is busy and cannot process the request */
 #define YAM_SLAVE_BUSY -6
+/** Return code - command sent to slave had a parity or CRC error */
 #define YAM_PARITY_ERROR -8
 
 /* Exeception codes returned by YAM */
-#define YAM_CRC_ERROR -256
-#define YAM_TIMEOUT -257
-#define YAM_INVALIDBYTECOUNT -258
-#define YAM_SERIAL_INIT_FAILED -259
-
+/** Return code - everything's OK */
 #define YAM_OK 0
+/** Return code - response from slave had a bad CRC */
+#define YAM_CRC_ERROR -256
+/** Return code - slave timed out */
+#define YAM_TIMEOUT -257
+/** Return code - invalid number of bytes returned by slave */
+#define YAM_INVALIDBYTECOUNT -258
+/** Return code - serial port init failed */
+#define YAM_SERIAL_INIT_FAILED -259
+/** Return code - too many registers/coils (exceeds ADU size) */
+#define YAM_TOO_MANY_REGISTERS -260
 
+/** Maximum ADU length, in bytes */
 #define YAM_MODBUS_MAX_ADU_LEN 256
+/** Maximum PDU length, in bytes */
 #define YAM_MODBUS_MAX_PDU_LEN 253
+/** Maximum number of registers per request */
 #define YAM_REGS_PER_REQUEST 123
+/** Maximum number of coils per request */
 #define YAM_COILS_PER_REQUEST 1968
+/** Default timeout of a request, in milliseconds */
 #define YAM_DEFAULT_TIMEOUT 1000
 
 int yam_modbus_init(const char *device_name,
