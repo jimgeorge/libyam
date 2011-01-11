@@ -91,18 +91,18 @@ static uint8_t crc_table_lo[] = {
 */
 static uint16_t crc16(uint8_t *buffer, uint16_t buffer_length)
 {
-        uint8_t crc_hi = 0xFF; /* high CRC byte initialized */
-        uint8_t crc_lo = 0xFF; /* low CRC byte initialized */
-        unsigned int i; /* will index into CRC lookup */
+	uint8_t crc_hi = 0xFF; /* high CRC byte initialized */
+	uint8_t crc_lo = 0xFF; /* low CRC byte initialized */
+	unsigned int i; /* will index into CRC lookup */
 
-        /* pass through message buffer */
-        while (buffer_length--) {
-                i = crc_hi ^ *buffer++; /* calculate the CRC  */
-                crc_hi = crc_lo ^ crc_table_hi[i];
-                crc_lo = crc_table_lo[i];
-        }
+	/* pass through message buffer */
+	while (buffer_length--) {
+		i = crc_hi ^ *buffer++; /* calculate the CRC  */
+		crc_hi = crc_lo ^ crc_table_hi[i];
+		crc_lo = crc_table_lo[i];
+	}
 
-        return (crc_hi << 8 | crc_lo);
+	return (crc_hi << 8 | crc_lo);
 }
 
 /**
@@ -205,7 +205,7 @@ int yam_get_serial_device(struct yam_modbus *bus)
 Sends the specified PDU (payload) to the specified address on the bus. The
 CRC is computed before sending.
 */
-void yam_send_generic_packet(struct yam_modbus *bus, uint8_t addr,
+static void yam_send_generic_packet(struct yam_modbus *bus, uint8_t addr,
                             uint8_t *pdu, uint8_t pdu_len)
 {
 	assert(bus != NULL);
@@ -245,7 +245,7 @@ void yam_send_generic_packet(struct yam_modbus *bus, uint8_t addr,
 This function reads back a packet of data from the Modbus/RTU, and splits
 it up into the ADU and PDU. The CRC is also verified.
 */
-int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
+static int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
                             uint8_t *pdu, uint8_t *pdu_len)
 {
 	assert(bus != NULL);
@@ -413,7 +413,7 @@ int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
 	return YAM_OK;
 }
 
-#define MAX_ERRORS 12
+#define MAX_ERRORS 13
 static struct {
 	int errnum;
 	char error_string[100];
@@ -429,13 +429,13 @@ static struct {
 	{YAM_TIMEOUT, "Timeout"},
 	{YAM_SERIAL_INIT_FAILED, "Serial Initialization Failed"},
 	{YAM_INVALIDBYTECOUNT, "Invalid Byte Count"},
+	{YAM_TOO_MANY_REGISTERS, "Too many registers or coils"},
 };
 
 static char *unknown_err = "Unknown Error";
 
 /**
 \brief Return string corresponding to error number
-\param *bus The YAM object representing the Modbus
 \param errnum Error number
 \return String describing the error
 
@@ -548,8 +548,11 @@ int yam_read_inputs(struct yam_modbus *bus, uint8_t addr,
                        uint16_t *regs)
 {
 	assert(bus != NULL);
-	assert(num_regs < YAM_REGS_PER_REQUEST);
 	assert(num_regs != 0);
+	
+	if (num_regs > YAM_REGS_PER_REQUEST) {
+		return (bus->last_errorcode = YAM_TOO_MANY_REGISTERS);
+	}
 	
 	int ret;
 
@@ -710,6 +713,7 @@ int yam_read_exception_status(struct yam_modbus *bus, uint8_t addr,
 \brief Write to multiple coils on the Modbus target
 \param *bus The YAM object representing the Modbus
 \param addr Address of the target Modbus device
+\param start_addr First coil number to write
 \param *coils Buffer containing coils to be written
 \param num_coils Number of coils within the buffer
 \return 0 on success, error code on failure
@@ -724,8 +728,11 @@ int yam_write_multiple_coils(struct yam_modbus *bus, uint8_t addr,
 {
 	assert(bus != NULL);
 	assert(coils != NULL);
-	assert(num_coils < YAM_COILS_PER_REQUEST);
 
+	if (num_coils > YAM_COILS_PER_REQUEST) {
+		return (bus->last_errorcode = YAM_TOO_MANY_REGISTERS);
+	}
+	
 	int ret;
 
 	struct {
@@ -773,8 +780,9 @@ int yam_write_multiple_coils(struct yam_modbus *bus, uint8_t addr,
 \brief Write to multiple registers on the Modbus target
 \param *bus The YAM object representing the Modbus
 \param addr Address of the target Modbus device
+\param start_addr First register to write to
 \param *regs Buffer containing registers to be written
-\param num_registers Number of registers within the buffer
+\param num_regs Number of registers within the buffer
 \return 0 on success, error code on failure
 
 Write to multiple coils on the Modbus target. Each byte in the *coils buffer
@@ -787,7 +795,10 @@ int yam_write_multiple_registers(struct yam_modbus *bus, uint8_t addr,
 {
 	assert(bus != NULL);
 	assert(regs != NULL);
-	assert(num_regs < YAM_REGS_PER_REQUEST);
+
+	if (num_regs > YAM_REGS_PER_REQUEST) {
+		return (bus->last_errorcode = YAM_TOO_MANY_REGISTERS);
+	}
 
 	int ret;
 
