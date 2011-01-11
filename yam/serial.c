@@ -143,6 +143,12 @@ int serial_port_init(const char *device_name,
 	return 0;
 }
 
+/**
+\brief Flush serial port
+\param fd Device number of serial port to flush
+
+Flush the buffers of the serial port
+*/
 void serial_port_flush(int fd)
 {
 	tcflush(fd, TCIOFLUSH);
