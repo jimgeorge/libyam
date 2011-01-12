@@ -3,3 +3,8 @@ Release: 0.2
 	* Fixed various mistakes in config files that pointed to old stuff
 	* Added functions to return the serial device and to set timeout
 
+2011-01-12	Jim George <jimgeorge@gmail.com>
+Release: 0.3
+	* Bug fixes to all functions that expect variable length input, prevents
+	trashing of the stack
+	* Added Read Coils and Read Discrete Inputs functions
