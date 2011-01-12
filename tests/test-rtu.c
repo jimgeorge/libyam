@@ -11,64 +11,220 @@
 #include <assert.h>
 #include <stdint.h>
 #include <time.h>
+#include <getopt.h>
+
+enum {
+	OPT_DEBUG,
+	OPT_RUNSTATUS,
+	OPT_READCOILS,
+	OPT_READDISCRETES,
+	OPT_READINPUT,
+	OPT_READREGISTER,
+	OPT_WRITECOIL,
+	OPT_WRITEREGISTER,
+	OPT_WRITECOILS,
+	OPT_WRITEREGISTERS,
+};
+
+char *usage_string =
+"Test libyam\n"
+"Usage:\n"
+"--debug: Enable debug mode\n"
+"--runstatus: Get the running status\n"
+"--readcoils=start[,num]: Read specified coils\n"
+"--readdiscretes=start[,num]: Read specified discrete inputs\n"
+"--readinput=start[,num]: Read specified inputs\n"
+"--readregister=start[,num]: Read specified register\n"
+"--writecoil=num,val: Write value to specified coil\n"
+"--writeregister=num,val: Write value to specified register\n"
+"--writecoils=num,val[,num]: Write value to specified coils\n"
+"--writeregisters=num,val[,num]: Write value to specified registers\n"
+"\n";
 
 int main(int argc, char *argv[])
 {
 	struct yam_modbus bs;
 	struct yam_modbus *bus;
 	uint16_t regs[100];
-	int slave_addr = 0x40;
-	
+	uint8_t coils[100];
+	int slave_addr = 1;
+	int opt_idx, opt_errors = 0, opt;
+
 	bus = &bs;
-	printf("Testing libyam\n");
+
+	static struct option opt_lst[] = {
+		{"debug", no_argument, 0, OPT_DEBUG},
+		{"runstatus", no_argument, 0, OPT_RUNSTATUS},
+		{"readcoils", required_argument, 0, OPT_READCOILS},
+		{"readdiscretes", required_argument, 0, OPT_READDISCRETES},
+		{"readinput", required_argument, 0, OPT_READINPUT},
+		{"readregister", required_argument, 0, OPT_READREGISTER},
+		{"writecoil", required_argument, 0, OPT_WRITECOIL},
+		{"writeregister", required_argument, 0, OPT_WRITEREGISTER},
+		{"writecoils", required_argument, 0, OPT_WRITECOILS},
+		{"writeregisters", required_argument, 0, OPT_WRITEREGISTERS},
+
+		{NULL, 0, 0, 0}
+	};
+
+	if (argc == 1) {
+		puts(usage_string);
+		return -1;
+	}
 
 	if (0 > yam_modbus_init("/dev/ttyUSB0", 57600, bus)) {
 		printf("Error initializing bus\n");
 		return -1;
 	}
 
-	//yam_debug(bus, 1);
 	int ret = 0;
-	int numregs = 8, start = 1000;
-	ret = yam_read_inputs(bus, slave_addr, start, numregs, regs);
-	if (0 > ret) {
-		yam_perror(bus, "Error reading registers");
-	}
-	else {
-		int ctr;
-		for (ctr = 0; ctr < numregs; ctr++) {
-			printf("Input %d = %d (0x%04X)\n", ctr + start, regs[ctr], regs[ctr]);
+	int numregs = 1, start = 40210;
+	char *save;
+	int value;
+
+	while (-1 != (opt = getopt_long(argc, argv, "dv", opt_lst, &opt_idx))) {
+		switch(opt) {
+		case OPT_DEBUG:
+			yam_debug(bus, 1);
+			break;
+		case OPT_RUNSTATUS:
+			{
+			uint8_t id, run_status, exception_status;
+			char additional_data[256];
+			int adl;
+			ret = yam_report_slave_id(bus, slave_addr, &id, &run_status, additional_data, &adl);
+			if (0 > ret) {
+				yam_perror(bus, "Error reading Slave ID");
+			}
+			else {
+				printf("ID: %02X, Run status: %02X, %d additional bytes\n", id, run_status, adl);
+			}
+			ret = yam_read_exception_status(bus, slave_addr, &exception_status);
+			if (0 > ret) {
+				yam_perror(bus, "Error reading exception status");
+			}
+			else {
+				printf("Exception status: %02X (%d)\n", exception_status, exception_status);
+			}
+			}
+			break;
+		case OPT_READCOILS:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
+			else numregs = 1;
+			ret = yam_read_coils(bus, slave_addr, start, numregs, coils);
+			if (0 > ret) {
+				yam_perror(bus, "Error reading coils");
+			}
+			else {
+				int ctr;
+				for (ctr = 0; ctr < numregs; ctr++) {
+					printf("Coil %d = %s\n", ctr + start, coils[ctr] ? "ON" : "OFF");
+				}
+			}
+			break;
+		case OPT_READDISCRETES:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
+			else numregs = 1;
+			ret = yam_read_discretes(bus, slave_addr, start, numregs, coils);
+			if (0 > ret) {
+				yam_perror(bus, "Error reading discrete inputs");
+			}
+			else {
+				int ctr;
+				for (ctr = 0; ctr < numregs; ctr++) {
+					printf("Discrete input %d = %s\n", ctr + start, coils[ctr] ? "ON" : "OFF");
+				}
+			}
+			break;
+		case OPT_READINPUT:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
+			else numregs = 1;
+			ret = yam_read_inputs(bus, slave_addr, start, numregs, regs);
+			if (0 > ret) {
+				yam_perror(bus, "Error reading registers");
+			}
+			else {
+				int ctr;
+				for (ctr = 0; ctr < numregs; ctr++) {
+					printf("Input %d = %d (0x%04X)\n", ctr + start, regs[ctr], regs[ctr]);
+				}
+			}
+			break;
+		case OPT_READREGISTER:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
+			else numregs = 1;
+			ret = yam_read_registers(bus, slave_addr, start, numregs, regs);
+			if (0 > ret) {
+				yam_perror(bus, "Error reading registers");
+			}
+			else {
+				int ctr;
+				for (ctr = 0; ctr < numregs; ctr++) {
+					printf("Input %d = %d (0x%04X)\n", ctr + start, regs[ctr], regs[ctr]);
+				}
+			}
+			break;
+		case OPT_WRITECOIL:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) value = strtoul(save + 1, NULL, 10);
+			else value = 0;
+			ret = yam_write_single_coil(bus, slave_addr, start, value);
+			if (0 > ret) {
+				yam_perror(bus, "Error writing coil");
+			}
+			break;
+		case OPT_WRITEREGISTER:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) value = strtoul(save + 1, NULL, 16);
+			else value = 0;
+			ret = yam_write_single_register(bus, slave_addr, start, value);
+			if (0 > ret) {
+				yam_perror(bus, "Error writing register");
+			}
+			break;
+		case OPT_WRITECOILS:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) value = strtoul(save + 1, &save, 10);
+			else value = 0;
+			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
+			else numregs = 1;
+			for (ret = 0; ret < numregs; ret++) {
+				coils[ret] = value;
+			}
+			ret = yam_write_multiple_coils(bus, slave_addr, start, coils, numregs);
+			if (0 > ret) {
+				yam_perror(bus, "Error writing coils");
+			}
+			break;
+		case OPT_WRITEREGISTERS:
+			start = strtoul(optarg, &save, 10);
+			if (0 != *save) value = strtoul(save + 1, &save, 10);
+			else value = 0;
+			if (0 != *save) numregs = strtoul(save + 1, NULL, 16);
+			else numregs = 1;
+			for (ret = 0; ret < numregs; ret++) {
+				regs[ret] = value;
+			}
+			ret = yam_write_multiple_registers(bus, slave_addr, start, regs, numregs);
+			if (0 > ret) {
+				yam_perror(bus, "Error writing register");
+			}
+			break;
+		default:
+			opt_errors++;
+			break;
 		}
-	}
-	//usleep(100000);
+	};
 
-	numregs = 4;
-	ret = yam_read_registers(bus, slave_addr, start, numregs, regs);
-	if (0 > ret) {
-		yam_perror(bus, "Error reading registers");
+	if (opt_errors) {
+		puts(usage_string);
 	}
-	else {
-		int ctr;
-		for (ctr = 0; ctr < numregs; ctr++) {
-			printf("Register %d = %d (0x%04X)\n", ctr + start, regs[ctr], regs[ctr]);
-		}
-	}
-	//usleep(100000);
-
-	uint8_t id, run_status;
-	char additional_data[256];
-	int adl;
-	ret = yam_report_slave_id(bus, slave_addr, &id, &run_status, additional_data, &adl);
-	if (0 > ret) {
-		yam_perror(bus, "Error reading Slave ID");
-	}
-	else {
-		printf("ID: %02X, Run status: %02X, %d additional bytes\n", id, run_status, adl);
-	}
-
 	yam_modbus_close(bus);
 
-	printf("Done!\n");
 	return 0;
 }
 
