@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = -I m4
 
 lib_LTLIBRARIES = libyam.la
 libyam_la_SOURCES = serial.c modbus.c modbus.h
-libyam_la_LDFLAGS = -version-info 0:2:0
+libyam_la_LDFLAGS = -version-info 1:2:1
 
 # Include files to install
 libyamincludedir = $(includedir)/yam
