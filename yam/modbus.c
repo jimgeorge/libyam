@@ -199,34 +199,30 @@ int yam_get_serial_device(struct yam_modbus *bus)
 \brief Send generic Modbus/RTU packet to the specified address
 \param *bus The YAM object representing the Modbus
 \param addr Address of the target Modbus device
-\param *pdu Protocol Data Unit (payload) to send to the address
-\param pdu_len Length of the PDU
+\param *adu Application Data Unit (PDU + address + CRC) to send to the slave
+\param adu_len Length of the ADU
 
 Sends the specified PDU (payload) to the specified address on the bus. The
 CRC is computed before sending.
 */
 static void yam_send_generic_packet(struct yam_modbus *bus, uint8_t addr,
-                            uint8_t *pdu, uint8_t pdu_len)
+                            uint8_t *adu, uint8_t adu_len)
 {
 	assert(bus != NULL);
-	assert(pdu != NULL);
-	assert((pdu_len + 3) < YAM_MODBUS_MAX_ADU_LEN);
+	assert(adu != NULL);
+	assert(adu_len < YAM_MODBUS_MAX_ADU_LEN);
 	
-	/* The Application Data Unit (ADU) is the PDU + address and CRC. */
-	uint8_t adu[YAM_MODBUS_MAX_ADU_LEN];
-	uint8_t adu_len = 0;
-	
-	adu[adu_len++] = addr;
-	memcpy(adu + 1, pdu, pdu_len);	adu_len += pdu_len;
-	uint16_t crc = crc16(adu, pdu_len + 1);
-	adu[adu_len++] = crc >> 8;
-	adu[adu_len++] = crc & 0x00FF;
+	adu[0] = addr;
+	/* Compute CRC over entire ADU, except for last 2 bytes that hold CRC */
+	uint16_t crc = crc16(adu, adu_len - sizeof(uint16_t));
+	adu[adu_len - 2] = crc >> 8;
+	adu[adu_len - 1] = crc & 0x00FF;
 
 	if (bus->debug) {
 		fprintf(stderr, "Generic send packet to %02X: CRC = %04X, "
-			"PDU: %d bytes, ADU: %d bytes\n", addr, crc, pdu_len, adu_len);
+			"ADU: %d bytes\n", addr, crc, adu_len);
 		int ctr;
-		for (ctr = 0; ctr < pdu_len + 3; ctr++) {
+		for (ctr = 0; ctr < adu_len; ctr++) {
 			fprintf(stderr, "[%.2X]", adu[ctr]);
 		}
 		fprintf(stderr, "\n");
@@ -238,24 +234,22 @@ static void yam_send_generic_packet(struct yam_modbus *bus, uint8_t addr,
 \brief Read back a packet from Modbus/RTU and interpret the results
 \param *bus The YAM object representing the Modbus
 \param *addr Address of the replying Modbus device
-\param *pdu Buffer where PDU will be stored
-\param *pdu_len Length of the PDU
+\param *adu Application Data Unit (PDU + address + CRC) to send to the slave
+\param adu_len Length of the ADU buffer pointed to by *adu
 \return YAM_OK on success, error code on failure
 
 This function reads back a packet of data from the Modbus/RTU, and splits
 it up into the ADU and PDU. The CRC is also verified.
 */
 static int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
-                            uint8_t *pdu, uint8_t *pdu_len)
+                            uint8_t *adu, size_t adu_buf_len)
 {
 	assert(bus != NULL);
 	assert(addr != NULL);
-	assert(pdu != NULL);
-	assert(pdu_len != NULL);
+	assert(adu != NULL);
 
 	enum {ADDR, FUNC, GETBYTECOUNT, READEXCEPTION, DATA, CRC, DONE, ERROR} state = ADDR;
 	
-	uint8_t adu[YAM_MODBUS_MAX_ADU_LEN];
 	uint8_t adu_len = 0;
 	int bytes_to_read = 1; /* Prime the reader, to read in the source addr */
 	int bytes_read;
@@ -273,7 +267,16 @@ static int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
 			ret = poll(&pfd, 1, bus->timeout_ms);
 		} while ((ret == -1) && (errno == EINTR));
 		if (ret == 0) {
-			return YAM_TIMEOUT;
+			state = ERROR;
+			errcode = YAM_TIMEOUT;
+			break;
+		}
+		
+		/* Check to see if next read will exceed max ADU size */
+		if ((adu_len + bytes_to_read) > adu_buf_len) {
+			state = ERROR;
+			errcode = YAM_INVALIDBYTECOUNT;
+			break;
 		}
 		
 		/* Now read the appropriate number of bytes, as determined by the
@@ -285,6 +288,14 @@ static int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
 				fprintf(stderr, "<%.2X>", adu[adu_len + ctr]);
 			}
 		}
+		/* If read returns 0 bytes despite poll saying there's something to
+		read, we've timed out. */
+		if (bytes_read == 0) {
+			state = ERROR;
+			errcode = YAM_TIMEOUT;
+			break;
+		}
+
 		bytes_to_read -= bytes_read;
 		adu_len += bytes_read;
 		
@@ -401,15 +412,7 @@ static int yam_read_generic_packet(struct yam_modbus *bus, uint8_t *addr,
 		return YAM_CRC_ERROR;
 	}
 
-	*addr = adu[0];
-	/* Copy the PDU to buffer, skipping address and CRC bytes */
-	if (adu_len < 3) {
-		*pdu_len = adu_len;
-	}
-	else {
-		*pdu_len = adu_len - 3;
-	}
-	memcpy(pdu, adu + 1, *pdu_len);
+	if (addr != NULL) *addr = adu[0];
 	return YAM_OK;
 }
 
@@ -469,6 +472,155 @@ void yam_perror(struct yam_modbus *bus, char *s)
 }
 
 /**
+\brief Read coils from the specified target
+\param *bus The YAM object representing the Modbus
+\param addr Address of the target Modbus device
+\param start_addr Address of the first register to read from the target
+\param num_coils Number of coils to read from the target
+\param *regs Location to store the coils
+\return YAM_OK on success, error code on failure
+
+Read one or more coils from the Modbus/RTU target. The results are placed in
+*coils, one byte per coil. If the coil was enabled, the corresponding byte is
+set to 0xFF, else it's set to 0. If an error occurs, *coils is unmodified, and
+the error code is returned. On success, YAM_OK is returned.
+*/
+int yam_read_coils(struct yam_modbus *bus, uint8_t addr,
+                       uint16_t start_addr, uint16_t num_coils,
+                       uint8_t *coils)
+{
+	assert(bus != NULL);
+	assert(num_coils != 0);
+
+	int ret;
+
+	if(num_coils > YAM_COILS_PER_REQUEST) {
+		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
+	}
+	
+	union {
+		uint8_t raw[YAM_MODBUS_MAX_ADU_LEN];
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_coils;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint8_t bytecount;
+				uint8_t coils[YAM_COILS_PER_REQUEST/8];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} PACKED adu;
+
+	adu.req_adu.pdu.fncode = YAM_READ_COILS;
+	adu.req_adu.pdu.start_addr = htons(start_addr);
+	adu.req_adu.pdu.num_coils = htons(num_coils);
+
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
+
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
+	if (0 > ret) {
+		return (bus->last_errorcode = ret);
+	}
+
+	int expected_bytes = (num_coils - 1) / 8 + 1;
+	if (adu.resp_adu.pdu.bytecount != expected_bytes) {
+		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
+	}
+	int ctr;
+	for (ctr = 0; ctr < num_coils; ctr++ ) {
+		uint8_t mask = (1 << (ctr % 8));
+		coils[ctr] = (adu.resp_adu.pdu.coils[ctr / 8] & mask) ? 0xFF : 0x00;
+	}
+
+	return (bus->last_errorcode = YAM_OK);
+}
+
+/**
+\brief Read discretes from the specified target
+\param *bus The YAM object representing the Modbus
+\param addr Address of the target Modbus device
+\param start_addr Address of the first register to read from the target
+\param num_discretes Number of discretes to read from the target
+\param *regs Location to store the discretes
+\return YAM_OK on success, error code on failure
+
+Read one or more discrete inputs from the Modbus/RTU target. The results are
+placed in *discretes, one byte per input. If the input was enabled, the
+corresponding byte is set to 0xFF, else it's set to 0. If an error occurs,
+*discretes is unmodified, and the error code is returned. On success, YAM_OK
+is returned.
+*/
+int yam_read_discretes(struct yam_modbus *bus, uint8_t addr,
+                       uint16_t start_addr, uint16_t num_discretes,
+                       uint8_t *discretes)
+{
+	assert(bus != NULL);
+	assert(num_discretes != 0);
+
+	int ret;
+
+	if(num_discretes > YAM_COILS_PER_REQUEST) {
+		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
+	}
+	
+	union {
+		uint8_t raw[YAM_MODBUS_MAX_ADU_LEN];
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_discretes;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint8_t bytecount;
+				uint8_t discretes[YAM_COILS_PER_REQUEST/8];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} PACKED adu;
+
+	adu.req_adu.pdu.fncode = YAM_READ_DISCRETES;
+	adu.req_adu.pdu.start_addr = htons(start_addr);
+	adu.req_adu.pdu.num_discretes = htons(num_discretes);
+
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
+
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
+	if (0 > ret) {
+		return (bus->last_errorcode = ret);
+	}
+
+	int expected_bytes = (num_discretes - 1) / 8 + 1;
+	if (adu.resp_adu.pdu.bytecount != expected_bytes) {
+		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
+	}
+	int ctr;
+	for (ctr = 0; ctr < num_discretes; ctr++ ) {
+		uint8_t mask = (1 << (ctr % 8));
+		discretes[ctr] = (adu.resp_adu.pdu.discretes[ctr / 8] & mask) ? 0xFF : 0x00;
+	}
+
+	return (bus->last_errorcode = YAM_OK);
+}
+
+/**
 \brief Read "holding" registers from the specified target
 \param *bus The YAM object representing the Modbus
 \param addr Address of the target Modbus device
@@ -488,43 +640,53 @@ int yam_read_registers(struct yam_modbus *bus, uint8_t addr,
 	assert(bus != NULL);
 	assert(num_regs < YAM_REGS_PER_REQUEST);
 	assert(num_regs != 0);
-	
+
 	int ret;
-
-	struct read_holding_reg {
-		uint8_t fncode;
-		uint16_t start_addr;
-		uint16_t num_regs;
-	} PACKED pdu;
 	
-	pdu.fncode = YAM_READ_REGISTERS;
-	pdu.start_addr = htons(start_addr);
-	pdu.num_regs = htons(num_regs);
+	union {
+		uint8_t raw[YAM_MODBUS_MAX_ADU_LEN];
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_regs;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint8_t bytecount;
+				uint16_t reg[YAM_REGS_PER_REQUEST];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} PACKED adu;
 
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu), sizeof(pdu));
-	
-	struct read_holding_reg_ret {
-		uint8_t fncode;
-		uint8_t bytecount;
-		uint16_t reg[0];
-	} PACKED ret_pdu;
+	adu.req_adu.pdu.fncode = YAM_READ_REGISTERS;
+	adu.req_adu.pdu.start_addr = htons(start_addr);
+	adu.req_adu.pdu.num_regs = htons(num_regs);
 
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu, &ret_pdu_len);
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
+
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
 	/* Check if the byte count is odd */
-	if (ret_pdu.bytecount & 0x01) {
+	if (adu.resp_adu.pdu.bytecount & 0x01) {
 		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
 	}
-	int num_ret_regs = ret_pdu.bytecount / 2;
+	int num_ret_regs = adu.resp_adu.pdu.bytecount / 2;
 	if (num_ret_regs != num_regs) {
 		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
 	}
 	int ctr;
 	for (ctr = 0; ctr < num_ret_regs; ctr++ ) {
-		regs[ctr] = ntohs(ret_pdu.reg[ctr]);
+		regs[ctr] = ntohs(adu.resp_adu.pdu.reg[ctr]);
 	}
 
 	return (bus->last_errorcode = YAM_OK);
@@ -556,39 +718,49 @@ int yam_read_inputs(struct yam_modbus *bus, uint8_t addr,
 	
 	int ret;
 
-	struct read_input {
-		uint8_t fncode;
-		uint16_t start_addr;
-		uint16_t num_regs;
-	} PACKED pdu;
-	
-	pdu.fncode = YAM_READ_INPUTS;
-	pdu.start_addr = htons(start_addr);
-	pdu.num_regs = htons(num_regs);
+	union {
+		uint8_t raw[YAM_MODBUS_MAX_ADU_LEN];
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_regs;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint8_t bytecount;
+				uint16_t reg[YAM_REGS_PER_REQUEST];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} PACKED adu;
 
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu), sizeof(pdu));
-	
-	struct read_input_ret {
-		uint8_t fncode;
-		uint8_t bytecount;
-		uint16_t reg[0];
-	} PACKED ret_pdu;
+	adu.req_adu.pdu.fncode = YAM_READ_INPUTS;
+	adu.req_adu.pdu.start_addr = htons(start_addr);
+	adu.req_adu.pdu.num_regs = htons(num_regs);
 
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu, &ret_pdu_len);
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
+	
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
-	if (ret_pdu.bytecount & 0x01) {
+	if (adu.resp_adu.pdu.bytecount & 0x01) {
 		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
 	}
-	int num_ret_regs = ret_pdu.bytecount / 2;
+	int num_ret_regs = adu.resp_adu.pdu.bytecount / 2;
 	if (num_ret_regs != num_regs) {
 		return (bus->last_errorcode = YAM_INVALIDBYTECOUNT);
 	}
 	int ctr;
 	for (ctr = 0; ctr < num_ret_regs; ctr++ ) {
-		regs[ctr] = ntohs(ret_pdu.reg[ctr]);
+		regs[ctr] = ntohs(adu.resp_adu.pdu.reg[ctr]);
 	}
 
 	return (bus->last_errorcode = YAM_OK);
@@ -612,19 +784,23 @@ int yam_write_single_coil(struct yam_modbus *bus, uint8_t addr,
 	int ret;
 
 	struct {
-		uint8_t fncode;
-		uint16_t output_addr;
-		uint16_t output_value;
-	} PACKED pdu, ret_pdu;
-	
-	pdu.fncode = YAM_WRITE_SINGLECOIL;
-	pdu.output_addr = htons(coil_addr);
-	pdu.output_value = htons(coil_state ? 0xFF00 : 0x0000);
+		uint8_t addr;
+		struct {
+			uint8_t fncode;
+			uint16_t output_addr;
+			uint16_t output_value;
+		} PACKED pdu;
+		uint16_t crc;
+	} PACKED adu;
 
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu), sizeof(pdu));
+	adu.pdu.fncode = YAM_WRITE_SINGLECOIL;
+	adu.pdu.output_addr = htons(coil_addr);
+	adu.pdu.output_value = htons(coil_state ? 0xFF00 : 0x0000);
+
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu));
 	
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu, &ret_pdu_len);
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
@@ -650,19 +826,23 @@ int yam_write_single_register(struct yam_modbus *bus, uint8_t addr,
 	int ret;
 
 	struct {
-		uint8_t fncode;
-		uint16_t output_addr;
-		uint16_t output_value;
-	} PACKED pdu, ret_pdu;
-	
-	pdu.fncode = YAM_WRITE_SINGLEREGISTER;
-	pdu.output_addr = htons(register_addr);
-	pdu.output_value = htons(register_value);
+		uint8_t addr;
+		struct {
+			uint8_t fncode;
+			uint16_t output_addr;
+			uint16_t output_value;
+		} PACKED pdu;
+		uint16_t crc;
+	} PACKED adu;
 
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu), sizeof(pdu));
+	adu.pdu.fncode = YAM_WRITE_SINGLEREGISTER;
+	adu.pdu.output_addr = htons(register_addr);
+	adu.pdu.output_value = htons(register_value);
+
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu));
 	
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu, &ret_pdu_len);
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
@@ -686,25 +866,34 @@ int yam_read_exception_status(struct yam_modbus *bus, uint8_t addr,
 
 	int ret;
 
-	struct {
-		uint8_t fncode;
-	} PACKED pdu;
+	union {
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint8_t exceptions;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} adu;
 	
-	struct {
-		uint8_t fncode;
-		uint8_t exceptions;
-	} PACKED ret_pdu;
-	
-	pdu.fncode = YAM_READ_EXCEPTIONSTATUS;
+	adu.req_adu.pdu.fncode = YAM_READ_EXCEPTIONSTATUS;
 
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu), sizeof(pdu));
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
 	
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu, &ret_pdu_len);
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
-	*exception_status = ret_pdu.exceptions;
+	*exception_status = adu.resp_adu.pdu.exceptions;
 
 	return (bus->last_errorcode = YAM_OK);
 }
@@ -735,40 +924,48 @@ int yam_write_multiple_coils(struct yam_modbus *bus, uint8_t addr,
 	
 	int ret;
 
-	struct {
-		uint8_t fncode;
-		uint16_t start_addr;
-		uint16_t num_coils;
-		uint8_t byte_count;
-		uint8_t packed_coils[YAM_MODBUS_MAX_PDU_LEN];
-	} PACKED pdu;
+	union {
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_coils;
+				uint8_t byte_count;
+				uint8_t packed_coils[YAM_MODBUS_MAX_PDU_LEN];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_coils;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} adu;
+
+	adu.req_adu.pdu.fncode = YAM_WRITE_COILS;
+	adu.req_adu.pdu.start_addr = htons(start_addr);
+	adu.req_adu.pdu.num_coils = htons(num_coils);
 	
-	struct {
-		uint8_t fncode;
-		uint16_t start_addr;
-		uint16_t num_coils;
-	} PACKED ret_pdu;
-	
-	pdu.fncode = YAM_WRITE_COILS;
-	pdu.start_addr = htons(start_addr);
-	pdu.num_coils = htons(num_coils);
-	
-	bzero(pdu.packed_coils, YAM_MODBUS_MAX_PDU_LEN);
+	bzero(adu.req_adu.pdu.packed_coils, YAM_MODBUS_MAX_PDU_LEN);
 	int ctr;
 	for (ctr = 0; ctr < num_coils; ctr++) {
 		if (coils[ctr]) {
-			pdu.packed_coils[ctr / 8] |= (1 << (ctr % 8));
+			adu.req_adu.pdu.packed_coils[ctr / 8] |= (1 << (ctr % 8));
 		}
 	}
-	pdu.byte_count = num_coils / 8 + 1;
+	adu.req_adu.pdu.byte_count = num_coils / 8 + 1;
 	/* For this call, we must calculate the number of bytes, since
 	sizeof will return even those members of packed_coils that are unused */
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu),
-	                        sizeof(pdu) - YAM_MODBUS_MAX_PDU_LEN +
-	                        pdu.byte_count);
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu,
-	                              &ret_pdu_len);
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu),
+	                        sizeof(adu.req_adu) - YAM_MODBUS_MAX_PDU_LEN +
+	                        adu.req_adu.pdu.byte_count);
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
@@ -802,37 +999,45 @@ int yam_write_multiple_registers(struct yam_modbus *bus, uint8_t addr,
 
 	int ret;
 
-	struct {
-		uint8_t fncode;
-		uint16_t start_addr;
-		uint16_t num_regs;
-		uint8_t byte_count;
-		uint16_t regs[YAM_REGS_PER_REQUEST];
-	} PACKED pdu;
-	
-	struct {
-		uint8_t fncode;
-		uint16_t start_addr;
-		uint16_t num_regs;
-	} PACKED ret_pdu;
-	
-	pdu.fncode = YAM_WRITE_REGISTERS;
-	pdu.start_addr = htons(start_addr);
-	pdu.num_regs = htons(num_regs);
+	union {
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_regs;
+				uint8_t byte_count;
+				uint16_t regs[YAM_REGS_PER_REQUEST];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint16_t start_addr;
+				uint16_t num_regs;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} adu;
+
+	adu.req_adu.pdu.fncode = YAM_WRITE_REGISTERS;
+	adu.req_adu.pdu.start_addr = htons(start_addr);
+	adu.req_adu.pdu.num_regs = htons(num_regs);
 	int ctr;
 	for (ctr = 0; ctr < num_regs; ctr++) {
-		pdu.regs[ctr] = htons(regs[ctr]);
+		adu.req_adu.pdu.regs[ctr] = htons(regs[ctr]);
 	}
-	pdu.byte_count = num_regs * 2;
+	adu.req_adu.pdu.byte_count = num_regs * 2;
 
 	/* For this call, we must calculate the number of bytes, since
 	sizeof will return even those members of regs that are unused */
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu),
-	                        sizeof(pdu) - YAM_REGS_PER_REQUEST *
-	                        sizeof(uint16_t) + pdu.byte_count);
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu,
-	                              &ret_pdu_len);
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu),
+	                        sizeof(adu.req_adu) - YAM_REGS_PER_REQUEST *
+	                        sizeof(uint16_t) + adu.req_adu.pdu.byte_count);
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
@@ -864,33 +1069,43 @@ int yam_report_slave_id(struct yam_modbus *bus, uint8_t addr, uint8_t *id,
 
 	int ret;
 
-	struct {
-		uint8_t fncode;
-	} PACKED pdu;
+	union {
+		uint8_t raw[YAM_MODBUS_MAX_ADU_LEN];
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED req_adu;
+		struct {
+			uint8_t addr;
+			struct {
+				uint8_t fncode;
+				uint8_t byte_count;
+				uint8_t slave_id;
+				uint8_t run_status;
+				uint8_t addl_data[1];
+			} PACKED pdu;
+			uint16_t crc;
+		} PACKED resp_adu;
+	} adu;
+
+	adu.req_adu.pdu.fncode = YAM_REPORTSLAVEID;
 	
-	struct {
-		uint8_t fncode;
-		uint8_t byte_count;
-		uint8_t slave_id;
-		uint8_t run_status;
-		uint8_t addl_data[1];
-	} PACKED ret_pdu;
-	
-	pdu.fncode = YAM_REPORTSLAVEID;
-	yam_send_generic_packet(bus, addr, (uint8_t *)(&pdu), sizeof(pdu));
-	uint8_t ret_addr, ret_pdu_len;
-	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&ret_pdu,
-	                              &ret_pdu_len);
+	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
+	uint8_t ret_addr;
+	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));
 	if (0 > ret) {
 		return (bus->last_errorcode = ret);
 	}
-	*id = ret_pdu.slave_id;
+	*id = adu.resp_adu.pdu.slave_id;
 	if (run_status) {
-		*run_status = ret_pdu.run_status;
+		*run_status = adu.resp_adu.pdu.run_status;
 	}
 	if (additional_data) {
-		memcpy(additional_data, ret_pdu.addl_data, ret_pdu.byte_count - 2);
-		*buflen = ret_pdu.byte_count - 2;
+		memcpy(additional_data, adu.resp_adu.pdu.addl_data, adu.resp_adu.pdu.byte_count - 2);
+		*buflen = adu.resp_adu.pdu.byte_count - 2;
 	}
 
 	return (bus->last_errorcode = YAM_OK);

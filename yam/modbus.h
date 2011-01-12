@@ -94,6 +94,12 @@ void yam_debug(struct yam_modbus *bus, int debug_status);
 void yam_set_timeout(struct yam_modbus *bus, int timeout_ms);
 int yam_get_serial_device(struct yam_modbus *bus);
 
+int yam_read_coils(struct yam_modbus *bus, uint8_t addr,
+                       uint16_t start_addr, uint16_t num_coils,
+                       uint8_t *coils);
+int yam_read_discretes(struct yam_modbus *bus, uint8_t addr,
+                       uint16_t start_addr, uint16_t num_discretes,
+                       uint8_t *discretes);
 int yam_read_registers(struct yam_modbus *bus, uint8_t addr,
                        uint16_t start_addr, uint16_t num_regs,
                        uint16_t *regs);
