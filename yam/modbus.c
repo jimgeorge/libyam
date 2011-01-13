@@ -477,7 +477,7 @@ void yam_perror(struct yam_modbus *bus, char *s)
 \param addr Address of the target Modbus device
 \param start_addr Address of the first register to read from the target
 \param num_coils Number of coils to read from the target
-\param *regs Location to store the coils
+\param *coils Location to store the coils
 \return YAM_OK on success, error code on failure
 
 Read one or more coils from the Modbus/RTU target. The results are placed in
@@ -551,7 +551,7 @@ int yam_read_coils(struct yam_modbus *bus, uint8_t addr,
 \param addr Address of the target Modbus device
 \param start_addr Address of the first register to read from the target
 \param num_discretes Number of discretes to read from the target
-\param *regs Location to store the discretes
+\param *discretes Location to store the discretes
 \return YAM_OK on success, error code on failure
 
 Read one or more discrete inputs from the Modbus/RTU target. The results are
@@ -1111,3 +1111,70 @@ int yam_report_slave_id(struct yam_modbus *bus, uint8_t addr, uint8_t *id,
 	return (bus->last_errorcode = YAM_OK);
 }
 
+/**
+\mainpage Yet Another Modbus Library
+\author Jim George
+
+Implements a Modbus/RTU master. Access to the modbus hardware is through a
+serial port. It is assumed that the device on the serial port can access
+the modbus bus through an RS-485 transceiver.
+
+The library attempts to follow the published Modbus/RTU specifications,
+available at http://www.modbus-ida.org/
+
+Commands currently implemented are:
+<table>
+<tr><th>Name</th><th>Function</th><th>Modbus command</th></tr>
+<tr><td>Read coils</td><td>yam_read_coils()</td><td>0x01</td></tr>
+<tr><td>Read discretes</td><td>yam_read_discretes()</td><td>0x02</td></tr>
+<tr><td>Read registers</td><td>yam_read_registers()</td><td>0x03</td></tr>
+<tr><td>Read inputs</td><td>yam_read_inputs()</td><td>0x04</td></tr>
+<tr><td>Write single coil</td><td>yam_write_single_coil()</td><td>0x05</td></tr>
+<tr><td>Write single register</td><td>yam_write_single_register()</td><td>0x06</td></tr>
+<tr><td>Read exception status</td><td>yam_read_exception_status()</td><td>0x07</td></tr>
+<tr><td>Write multiple coils</td><td>yam_write_multiple_coils()</td><td>0x0F</td></tr>
+<tr><td>Write multiple registers</td><td>yam_write_multiple_registers()</td><td>0x10</td></tr>
+<tr><td>Report slave ID</td><td>yam_report_slave_id()</td><td>0x11</td></tr>
+</table>
+
+\section tutorial Quick tutorial
+\li Open the Modbus serial device, using the yam_modbus_init() function
+\li Optionally, enable debug output using yam_debug(). Debug output contains
+all the serial traffic. Transmitted bytes are enclosed in [box brackets], and
+received bytes in &lt;angle brackets&gt;.
+\li Optionally, set up the timeout using yam_set_timeout()
+\li Use any of the yam_read_* or yam_write_* functions to communicate with a
+Modbus device on the bus
+\li On close, call yam_modbus_close() to close the device.
+
+\section testing Testing
+The library  has been tested using a SerialGear USBG-COMi-M USB to serial adapter, which
+makes use of the FTDI FT232 USB UART. These are known to use a hardware signal
+to control the bus direction, so turnaround contention is not a problem.
+
+In particular, Prolific PL2303-based USB UARTs won't work well in this
+application, since they depend on the host using the DTR line to control
+the transmit enable on the RS-485 transceiver. This works (sort-of) on Windows,
+but the Linux serial driver does not implement it.
+
+Target devices include an ADAM-4150 digital I/O module and various in-house
+developed boards that make use of a free modbus slave implementation available
+at http://freemodbus.berlios.de/
+
+\section notes Notes
+All serial I/O is synchronous, ie, any calls to yam_read_* or yam_write_*
+functions will block until the remote device responds with a reply packet,
+or the timeout interval is reached.
+
+Modbus register and coil numbers all start from 0. No address-space separation
+based on the target object (ie, coils, discretes, etc) is attempted, since it
+is not part of the Modbus/RTU specification. This seems to be popular among
+various Modbus hardware vendors, who make use of various address space splits.
+For example, Advantech (makers of the ADAM series I/O modules) uses 40001 as
+the base address for all registers. Attempting to read address 40001 will
+silently fail - you should in fact start at address 0. Other manufacturers
+follow different conventions, please check the documentation.
+
+\todo
+Add support for Modbus/TCP
+*/
