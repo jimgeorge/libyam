@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <yam/modbus.h>
 #include <assert.h>
@@ -15,6 +16,8 @@
 
 enum {
 	OPT_DEBUG,
+	OPT_TIMEOUT,
+	OPT_DEVICE,
 	OPT_RUNSTATUS,
 	OPT_READCOILS,
 	OPT_READDISCRETES,
@@ -29,7 +32,12 @@ enum {
 char *usage_string =
 "Test libyam\n"
 "Usage:\n"
+"Options:\n"
 "--debug: Enable debug mode\n"
+"--timeout=val: Set timeout (in milliseconds, default = 1 sec)\n"
+"--device=dev,baudrate: Set serial device (default: /dev/ttyUSB0, 57600 bps)\n"
+"\n"
+"Modbus commands:\n"
 "--runstatus: Get the running status\n"
 "--readcoils=start[,num]: Read specified coils\n"
 "--readdiscretes=start[,num]: Read specified discrete inputs\n"
@@ -49,11 +57,15 @@ int main(int argc, char *argv[])
 	uint8_t coils[100];
 	int slave_addr = 1;
 	int opt_idx, opt_errors = 0, opt;
+	int baudrate = 57600;
+	char serdev[YAM_MAX_DEVICE_NAME] = "/dev/ttyUSB0";
 
 	bus = &bs;
 
 	static struct option opt_lst[] = {
 		{"debug", no_argument, 0, OPT_DEBUG},
+		{"timeout", required_argument, 0, OPT_TIMEOUT},
+		{"device", required_argument, 0, OPT_DEVICE},
 		{"runstatus", no_argument, 0, OPT_RUNSTATUS},
 		{"readcoils", required_argument, 0, OPT_READCOILS},
 		{"readdiscretes", required_argument, 0, OPT_READDISCRETES},
@@ -72,7 +84,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (0 > yam_modbus_init("/dev/ttyUSB0", 57600, bus)) {
+	if (0 > yam_modbus_init(serdev, baudrate, bus)) {
 		printf("Error initializing bus\n");
 		return -1;
 	}
@@ -86,6 +98,24 @@ int main(int argc, char *argv[])
 		switch(opt) {
 		case OPT_DEBUG:
 			yam_debug(bus, 1);
+			break;
+		case OPT_TIMEOUT:
+			yam_set_timeout(bus, strtoul(optarg, NULL, 10));
+			break;
+		case OPT_DEVICE:
+			{
+			yam_modbus_close(bus);
+			char *delims=", ";
+			strncpy(serdev, strtok(optarg, delims), YAM_MAX_DEVICE_NAME);
+			char *baudstr = strtok(NULL, delims);
+			if (baudstr != NULL) baudrate = strtoul(baudstr, NULL, 10);
+			else baudrate = 57600;
+			if (0 > yam_modbus_init(serdev, baudrate, bus)) {
+				printf("Error initializing bus with device %s at %d bps\n",
+					serdev, baudrate);
+				return -1;
+			}
+			}
 			break;
 		case OPT_RUNSTATUS:
 			{
