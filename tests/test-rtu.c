@@ -18,6 +18,7 @@ enum {
 	OPT_DEBUG,
 	OPT_TIMEOUT,
 	OPT_DEVICE,
+	OPT_SLAVEADDR,
 	OPT_RUNSTATUS,
 	OPT_READCOILS,
 	OPT_READDISCRETES,
@@ -31,11 +32,12 @@ enum {
 
 char *usage_string =
 "Test libyam\n"
-"Usage:\n"
+"Usage: test-rtu [options] [commands]\n"
 "Options:\n"
 "--debug: Enable debug mode\n"
 "--timeout=val: Set timeout (in milliseconds, default = 1 sec)\n"
 "--device=dev,baudrate: Set serial device (default: /dev/ttyUSB0, 57600 bps)\n"
+"--address=addr: Set slave address\n"
 "\n"
 "Modbus commands:\n"
 "--runstatus: Get the running status\n"
@@ -55,7 +57,7 @@ int main(int argc, char *argv[])
 	struct yam_modbus *bus;
 	uint16_t regs[100];
 	uint8_t coils[100];
-	int slave_addr = 1;
+	int slave_addr = 0x40;
 	int opt_idx, opt_errors = 0, opt;
 	int baudrate = 57600;
 	char serdev[YAM_MAX_DEVICE_NAME] = "/dev/ttyUSB0";
@@ -66,6 +68,7 @@ int main(int argc, char *argv[])
 		{"debug", no_argument, 0, OPT_DEBUG},
 		{"timeout", required_argument, 0, OPT_TIMEOUT},
 		{"device", required_argument, 0, OPT_DEVICE},
+		{"address", required_argument, 0, OPT_SLAVEADDR},
 		{"runstatus", no_argument, 0, OPT_RUNSTATUS},
 		{"readcoils", required_argument, 0, OPT_READCOILS},
 		{"readdiscretes", required_argument, 0, OPT_READDISCRETES},
@@ -116,6 +119,9 @@ int main(int argc, char *argv[])
 				return -1;
 			}
 			}
+			break;
+		case OPT_SLAVEADDR:
+			slave_addr = strtoul(optarg, NULL, 16);
 			break;
 		case OPT_RUNSTATUS:
 			{
@@ -225,7 +231,7 @@ int main(int argc, char *argv[])
 			for (ret = 0; ret < numregs; ret++) {
 				coils[ret] = value;
 			}
-			ret = yam_write_multiple_coils(bus, slave_addr, start, coils, numregs);
+			ret = yam_write_multiple_coils(bus, slave_addr, start, numregs, coils);
 			if (0 > ret) {
 				yam_perror(bus, "Error writing coils");
 			}
@@ -239,7 +245,7 @@ int main(int argc, char *argv[])
 			for (ret = 0; ret < numregs; ret++) {
 				regs[ret] = value;
 			}
-			ret = yam_write_multiple_registers(bus, slave_addr, start, regs, numregs);
+			ret = yam_write_multiple_registers(bus, slave_addr, start, numregs, regs);
 			if (0 > ret) {
 				yam_perror(bus, "Error writing register");
 			}
