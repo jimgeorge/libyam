@@ -26,6 +26,8 @@ struct yam_modbus {
 	int timeout_ms; /**< Timeout, in milliseconds, when reading */
 	int last_errorcode; /**< Last error code seen by this bus */
 	char device_name[YAM_MAX_DEVICE_NAME]; /**< Name of the serial device */
+	char slaveidhack; /**< Set nonzero to subtract 1 from slave ID additional bytes
+	                       field, to match nonstandard behavior of libmodbus */
 };
 
 /* MODBUS Function codes */
@@ -113,16 +115,16 @@ int yam_write_single_register(struct yam_modbus *bus, uint8_t addr,
 int yam_read_exception_status(struct yam_modbus *bus, uint8_t addr,
                               uint8_t *exception_status);
 int yam_write_multiple_coils(struct yam_modbus *bus, uint8_t addr,
-                             uint16_t start_addr, uint8_t *coils,
-                             uint16_t num_coils);
+                             uint16_t start_addr, uint16_t num_coils,
+                             uint8_t *coils);
 int yam_write_multiple_registers(struct yam_modbus *bus, uint8_t addr,
-                                 uint16_t start_addr, uint16_t *regs,
-                                 uint16_t num_regs);
+                                 uint16_t start_addr, uint16_t num_regs,
+                                 uint16_t *regs);
 int yam_report_slave_id(struct yam_modbus *bus, uint8_t addr, uint8_t *id,
                         uint8_t *run_status, char *additional_data, int *buflen);
 
 void yam_perror(struct yam_modbus *bus, char *s);
 char *yam_strerror(int errnum);
+char *yam_errorstr(struct yam_modbus *bus);
 
 #endif /* _YAM_MODBUS_H_ */
-

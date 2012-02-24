@@ -55,7 +55,7 @@ returned.
 static speed_t serial_port_get_speed(const unsigned int speed)
 {
 	int ctr;
-	
+
 	for (ctr = 0; ctr < SERIAL_PORT_SPD_TBL_MAX; ctr++) {
 		if (speed == serial_port_speed_table[ctr].baud) {
 			return serial_port_speed_table[ctr].ident;
@@ -78,15 +78,15 @@ int serial_port_init(const char *device_name,
 	int *port)
 {
 	struct termios term_st;
-	
+
 	assert(device_name != NULL);
 	assert(port != NULL);
-	
+
 	*port = open(device_name, O_RDWR | O_NOCTTY);
 	if (*port < 0) {
 		return -1;
 	}
-	
+
 	bzero(&term_st, sizeof(struct termios));
 
 	if (tcgetattr(*port, &term_st)) {
@@ -98,7 +98,7 @@ int serial_port_init(const char *device_name,
 	ioctl(*port, TIOCMGET, &status);
 	status &= ~TIOCM_DTR;
 	ioctl(*port, TIOCMSET, &status);
-	
+
 	/* Set interface speed */
 	{
 		int spd_macro = serial_port_get_speed(speed);
@@ -109,24 +109,24 @@ int serial_port_init(const char *device_name,
 	/* Enable raw mode output */
 	cfmakeraw(&term_st);
 	term_st.c_oflag &= ~OPOST;
-	
+
 	/* Don't own the terminal (^C won't kill us), Enable rcv, Drop DTR on close */
-	term_st.c_cflag |= (CREAD | HUPCL);
-	
+	term_st.c_cflag |= (CREAD | HUPCL | CLOCAL);
+
 	/* Set 8-bit port size */
 	term_st.c_cflag &= ~CSIZE; term_st.c_cflag |= CS8;
 
 	/* No parity, 1 stop bit */
 	term_st.c_cflag &= ~PARENB; term_st.c_cflag &= ~CSTOPB;
-	
+
 	/* Turn off flow control, RS-485 does not use it */
 	term_st.c_cflag &= ~CRTSCTS;
 	term_st.c_iflag &= ~(IXON | IXOFF | IXANY);
-	
+
 	/* Set timeout to 1 second */
 	term_st.c_cc[VMIN] = 0;
-	term_st.c_cc[VTIME] = 10;
-	
+	term_st.c_cc[VTIME] = 0;
+
 	if (tcflush(*port, TCIOFLUSH)) {
 		perror("tcflush");
 		return -1;
@@ -135,11 +135,11 @@ int serial_port_init(const char *device_name,
 		perror("tcgetattr");
 		return -1;
 	}
-	
+
 	ioctl(*port, TIOCMGET, &status);
 	status |= TIOCM_DTR;
 	ioctl(*port, TIOCMSET, &status);
-	
+
 	return 0;
 }
 
