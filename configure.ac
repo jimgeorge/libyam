@@ -1,6 +1,6 @@
 dnl Autoconf script for libyam
 
-AC_INIT(libyam, 0.4, jgeorge@engr.colostate.edu)
+AC_INIT(libyam, 0.4.1, jgeorge@engr.colostate.edu)
 AC_CONFIG_SRCDIR([yam/modbus.c])
 LT_INIT
 AC_CONFIG_MACRO_DIR([m4])

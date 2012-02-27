@@ -16,6 +16,7 @@
 #include <linux/serial.h>
 #include <errno.h>
 #include "serial.h"
+#include "modbus.h"
 
 #define SERIAL_PORT_SPD_TBL_MAX 18
 static struct {
@@ -74,7 +75,7 @@ static speed_t serial_port_get_speed(const unsigned int speed)
 The port is opened with 8N1 settings (8-bit, no parity, 1 stop bit)
 */
 int serial_port_init(const char *device_name,
-	unsigned int speed,
+	unsigned int speed, unsigned int flags,
 	int *port)
 {
 	struct termios term_st;
@@ -114,14 +115,53 @@ int serial_port_init(const char *device_name,
 	term_st.c_cflag |= (CREAD | HUPCL | CLOCAL);
 
 	/* Set 8-bit port size */
-	term_st.c_cflag &= ~CSIZE; term_st.c_cflag |= CS8;
+	term_st.c_cflag &= ~CSIZE;
+	switch (flags & YAM_SERIAL_FLAGS_BITS_MSK) {
+	case YAM_SERIAL_FLAGS_8BIT:
+		term_st.c_cflag |= CS8;
+		break;
+	case YAM_SERIAL_FLAGS_7BIT:
+		term_st.c_cflag |= CS7;
+		break;
+	case YAM_SERIAL_FLAGS_6BIT:
+		term_st.c_cflag |= CS6;
+		break;
+	}
 
 	/* No parity, 1 stop bit */
-	term_st.c_cflag &= ~PARENB; term_st.c_cflag &= ~CSTOPB;
+	term_st.c_cflag &= ~(PARENB | PARODD);
+	switch (flags & YAM_SERIAL_FLAGS_PARITY_MSK) {
+	case YAM_SERIAL_FLAGS_NO_PARITY:
+	default:
+		break;
+	case YAM_SERIAL_FLAGS_ODD_PARITY:
+		term_st.c_cflag |= (PARENB | PARODD);
+		break;
+	case YAM_SERIAL_FLAGS_EVEN_PARITY:
+		term_st.c_cflag |= PARENB;
+		break;
+	}
+	if (flags & YAM_SERIAL_FLAGS_TWO_STOP) {
+		term_st.c_cflag |= CSTOPB;
+	}
+	else {
+		term_st.c_cflag &= ~CSTOPB;
+	}
 
 	/* Turn off flow control, RS-485 does not use it */
 	term_st.c_cflag &= ~CRTSCTS;
 	term_st.c_iflag &= ~(IXON | IXOFF | IXANY);
+	switch (flags & YAM_SERIAL_FLAGS_HANDSHAKE_MSK) {
+	case YAM_SERIAL_FLAGS_NO_HANDSHAKE:
+	default:
+		break;
+	case YAM_SERIAL_FLAGS_HW_HANDSHAKE:
+		term_st.c_cflag |= CRTSCTS;
+		break;
+	case YAM_SERIAL_FLAGS_SW_HANDSHAKE:
+		term_st.c_iflag |= (IXON | IXOFF);
+		break;
+	}
 
 	/* Set timeout to 1 second */
 	term_st.c_cc[VMIN] = 0;

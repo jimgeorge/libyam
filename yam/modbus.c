@@ -111,17 +111,19 @@ static uint16_t crc16(uint8_t *buffer, uint16_t buffer_length)
 \brief Initialize a YAM object with the specified parameters
 \param *device_name Name of serial port device to use
 \param speed Speed of serial port (in bps)
+\param flags Various flags affecting serial port operation
 \param *bus The YAM object representing the Modbus
 \return YAM_OK on success, YAM_SERIAL_INIT_FAILED on failure
 
 This function initializes a YAM object. The specified serial device is opened
-with the specified bus speed, in 8-bit mode, without handshaking, no parity,
-1 stop bit (8-N-1). The YAM object is returned in the *bus parameter, which
+with the specified bus speed. The flags affect the number of bits,
+handshaking mode and parity (use the YAM_SERIAL_FLAGS_* constants).
+The YAM object is returned in the *bus parameter, which
 must be allocated prior to calling this function. If an error occurs, no
 change is made to the bus parameter, and -1 is returned.
 */
 int yam_modbus_init(const char *device_name,
-             unsigned int speed,
+             unsigned int speed, unsigned int flags,
              struct yam_modbus *bus)
 {
 	int port;
@@ -129,7 +131,7 @@ int yam_modbus_init(const char *device_name,
 	assert(bus != NULL);
 
 	/* First initialize the serial port */
-	if (-1 == serial_port_init(device_name, speed, &port)) {
+	if (-1 == serial_port_init(device_name, speed, flags, &port)) {
 		return (bus->last_errorcode = YAM_SERIAL_INIT_FAILED);
 	}
 	bzero(bus, sizeof(struct yam_modbus));
@@ -690,18 +692,8 @@ int yam_read_registers(struct yam_modbus *bus, uint8_t addr,
 
 	int avail;
 	ioctl(bus->serial, FIONREAD, &avail);
-	printf("before send: available: %d\n", avail);
 
 	yam_send_generic_packet(bus, addr, (uint8_t *)(&adu), sizeof(adu.req_adu));
-
-	ioctl(bus->serial, FIONREAD, &avail);
-	printf("after send: available: %d\n", avail);
-
-	printf("Waiting\n");
-	usleep(50000);
-
-	ioctl(bus->serial, FIONREAD, &avail);
-	printf("after wait: available: %d\n", avail);
 
 	uint8_t ret_addr;
 	ret = yam_read_generic_packet(bus, &ret_addr, (uint8_t *)&adu, sizeof(adu));

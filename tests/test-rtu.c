@@ -36,7 +36,8 @@ char *usage_string =
 "Options:\n"
 "--debug: Enable debug mode\n"
 "--timeout=val: Set timeout (in milliseconds, default = 1 sec)\n"
-"--device=dev,baudrate: Set serial device (default: /dev/ttyUSB0, 57600 bps)\n"
+"--device=dev[,baudrate[,bits[,par[,stop]]]: Set serial device\n"
+"             (default: /dev/ttyUSB0, 57600 bps, 8b, Even parity, 1 stop bit)\n"
 "--address=addr: Set slave address\n"
 "\n"
 "Modbus commands:\n"
@@ -54,12 +55,13 @@ char *usage_string =
 int main(int argc, char *argv[])
 {
 	struct yam_modbus bs;
-	struct yam_modbus *bus;
+	struct yam_modbus *bus = NULL;
 	uint16_t regs[100];
 	uint8_t coils[100];
 	int slave_addr = 0x40;
 	int opt_idx, opt_errors = 0, opt;
 	int baudrate = 57600;
+	int serial_flags = 0;
 	char serdev[YAM_MAX_DEVICE_NAME] = "/dev/ttyUSB0";
 
 	bus = &bs;
@@ -87,10 +89,8 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (0 > yam_modbus_init(serdev, baudrate, bus)) {
-		printf("Error initializing bus\n");
-		return -1;
-	}
+	bzero(bus, sizeof(struct yam_modbus));
+	yam_modbus_init(serdev, baudrate, YAM_SERIAL_FLAGS_DEFAULT, bus);
 
 	int ret = 0;
 	int numregs = 1, start = 40210;
@@ -100,12 +100,15 @@ int main(int argc, char *argv[])
 	while (-1 != (opt = getopt_long(argc, argv, "dv", opt_lst, &opt_idx))) {
 		switch(opt) {
 		case OPT_DEBUG:
+			if (bus->serial == 0) goto bus_not_initialized;
 			yam_debug(bus, 1);
 			break;
 		case OPT_TIMEOUT:
+			if (bus->serial == 0) goto bus_not_initialized;
 			yam_set_timeout(bus, strtoul(optarg, NULL, 10));
 			break;
 		case OPT_DEVICE:
+			if (bus->serial == 0) goto bus_not_initialized;
 			{
 			yam_modbus_close(bus);
 			char *delims=", ";
@@ -113,7 +116,61 @@ int main(int argc, char *argv[])
 			char *baudstr = strtok(NULL, delims);
 			if (baudstr != NULL) baudrate = strtoul(baudstr, NULL, 10);
 			else baudrate = 57600;
-			if (0 > yam_modbus_init(serdev, baudrate, bus)) {
+			char *bitsstr = strtok(NULL, delims);
+			if (bitsstr != NULL) {
+				if (!strcasecmp(bitsstr, "8")) {
+					serial_flags |= YAM_SERIAL_FLAGS_8BIT;
+				}
+				else if (!strcasecmp(bitsstr, "7")) {
+					serial_flags |= YAM_SERIAL_FLAGS_7BIT;
+				}
+				else if (!strcasecmp(bitsstr, "6")) {
+					serial_flags |= YAM_SERIAL_FLAGS_6BIT;
+				}
+				else {
+					printf("Could not parse number of bits\n");
+					return -1;
+				}
+			}
+			else {
+				serial_flags |= YAM_SERIAL_FLAGS_8BIT;
+			}
+			char *parstr = strtok(NULL, delims);
+			if (parstr != NULL) {
+				if (!strcasecmp(parstr, "N")) {
+					serial_flags |= YAM_SERIAL_FLAGS_NO_PARITY;
+				}
+				else if (!strcasecmp(parstr, "E")) {
+					serial_flags |= YAM_SERIAL_FLAGS_EVEN_PARITY;
+				}
+				else if (!strcasecmp(parstr, "O")) {
+					serial_flags |= YAM_SERIAL_FLAGS_ODD_PARITY;
+				}
+				else {
+					printf("Could not parse parity type\n");
+					return -1;
+				}
+			}
+			else {
+				serial_flags |= YAM_SERIAL_FLAGS_NO_PARITY;
+			}
+			char *stopstr = strtok(NULL, delims);
+			if (stopstr != NULL) {
+				if (!strcasecmp(stopstr, "1")) {
+					serial_flags |= YAM_SERIAL_FLAGS_ONE_STOP;
+				}
+				else if (!strcasecmp(stopstr, "2")) {
+					serial_flags |= YAM_SERIAL_FLAGS_TWO_STOP;
+				}
+				else {
+					printf("Could not parse number of stop bits\n");
+					return -1;
+				}
+			}
+			else {
+				serial_flags |= YAM_SERIAL_FLAGS_ONE_STOP;
+			}
+			if (0 > yam_modbus_init(serdev, baudrate, serial_flags , bus)) {
 				printf("Error initializing bus with device %s at %d bps\n",
 					serdev, baudrate);
 				return -1;
@@ -124,6 +181,7 @@ int main(int argc, char *argv[])
 			slave_addr = strtoul(optarg, NULL, 16);
 			break;
 		case OPT_RUNSTATUS:
+			if (bus->serial == 0) goto bus_not_initialized;
 			{
 			uint8_t id, run_status, exception_status;
 			char additional_data[256];
@@ -145,6 +203,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READCOILS:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -160,6 +219,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READDISCRETES:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -175,6 +235,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READINPUT:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -190,6 +251,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READREGISTER:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -205,6 +267,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITECOIL:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, NULL, 10);
 			else value = 0;
@@ -214,6 +277,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITEREGISTER:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, NULL, 16);
 			else value = 0;
@@ -223,6 +287,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITECOILS:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, &save, 10);
 			else value = 0;
@@ -237,6 +302,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITEREGISTERS:
+			if (bus->serial == 0) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, &save, 10);
 			else value = 0;
@@ -255,12 +321,16 @@ int main(int argc, char *argv[])
 			break;
 		}
 	};
-
 	if (opt_errors) {
 		puts(usage_string);
 	}
 	yam_modbus_close(bus);
 
 	return 0;
+
+bus_not_initialized:
+	printf("Default device (%s) not available\n", serdev);
+	puts ("Serial bus not initialized");
+	return -1;
 }
 

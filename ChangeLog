@@ -14,3 +14,8 @@ Release: 0.4
 	* Added yam_errorstr function
 	* Flipped the order of write_multiple_coils and write_multiple_registers
 	arguments
+
+2012-02-27	Jim George <jimgeorge@gmail.com>
+Release: 0.4.1
+	* Added extra params to yam_modbus_init to set flags for parity,
+	handshaking, number of bits per word and number of stop bits

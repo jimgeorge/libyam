@@ -7,7 +7,7 @@
 #ifndef _YAM_SERIAL_H_
 
 int serial_port_init(const char *device_name,
-	unsigned int speed,
+	unsigned int speed, unsigned int flags,
 	int *port);
 void serial_port_flush(int fd);
 

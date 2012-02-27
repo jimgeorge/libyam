@@ -30,6 +30,32 @@ struct yam_modbus {
 	                       field, to match nonstandard behavior of libmodbus */
 };
 
+/* Serial flags */
+#define YAM_SERIAL_FLAGS_PARITY_MSK (3 << 0)
+#define YAM_SERIAL_FLAGS_NO_PARITY (0 << 0)
+#define YAM_SERIAL_FLAGS_EVEN_PARITY (1 << 0)
+#define YAM_SERIAL_FLAGS_ODD_PARITY (2 << 0)
+#define YAM_SERIAL_FLAGS_HANDSHAKE_MSK (3 << 2)
+#define YAM_SERIAL_FLAGS_NO_HANDSHAKE 0
+#define YAM_SERIAL_FLAGS_HW_HANDSHAKE (1 << 2)
+#define YAM_SERIAL_FLAGS_SW_HANDSHAKE (2 << 2)
+#define YAM_SERIAL_FLAGS_ONE_STOP 0
+#define YAM_SERIAL_FLAGS_TWO_STOP (1 << 4)
+#define YAM_SERIAL_FLAGS_BITS_MSK (3 << 5)
+#define YAM_SERIAL_FLAGS_8BIT (0 << 5)
+#define YAM_SERIAL_FLAGS_6BIT (1 << 5)
+#define YAM_SERIAL_FLAGS_7BIT (2 << 5)
+
+#define YAM_SERIAL_FLAGS_8N1 (YAM_SERIAL_FLAGS_8BIT | \
+		YAM_SERIAL_FLAGS_NO_HANDSHAKE | \
+		YAM_SERIAL_FLAGS_NO_PARITY | \
+		YAM_SERIAL_FLAGS_ONE_STOP)
+
+#define YAM_SERIAL_FLAGS_DEFAULT (YAM_SERIAL_FLAGS_8BIT | \
+		YAM_SERIAL_FLAGS_NO_HANDSHAKE | \
+		YAM_SERIAL_FLAGS_EVEN_PARITY | \
+		YAM_SERIAL_FLAGS_ONE_STOP)
+
 /* MODBUS Function codes */
 #define YAM_READ_COILS 0x01
 #define YAM_READ_DISCRETES 0x02
@@ -89,7 +115,7 @@ struct yam_modbus {
 #define YAM_DEFAULT_TIMEOUT 1000
 
 int yam_modbus_init(const char *device_name,
-             unsigned int speed,
+             unsigned int speed, unsigned int flags,
              struct yam_modbus *bus);
 void yam_modbus_close(struct yam_modbus *bus);
 void yam_debug(struct yam_modbus *bus, int debug_status);
