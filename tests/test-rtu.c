@@ -90,6 +90,7 @@ int main(int argc, char *argv[])
 	}
 
 	bzero(bus, sizeof(struct yam_modbus));
+	bus->serial = -1;
 	yam_modbus_init(serdev, baudrate, YAM_SERIAL_FLAGS_DEFAULT, bus);
 
 	int ret = 0;
@@ -100,15 +101,15 @@ int main(int argc, char *argv[])
 	while (-1 != (opt = getopt_long(argc, argv, "dv", opt_lst, &opt_idx))) {
 		switch(opt) {
 		case OPT_DEBUG:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			yam_debug(bus, 1);
 			break;
 		case OPT_TIMEOUT:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			yam_set_timeout(bus, strtoul(optarg, NULL, 10));
 			break;
 		case OPT_DEVICE:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			{
 			yam_modbus_close(bus);
 			char *delims=", ";
@@ -181,7 +182,7 @@ int main(int argc, char *argv[])
 			slave_addr = strtoul(optarg, NULL, 16);
 			break;
 		case OPT_RUNSTATUS:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			{
 			uint8_t id, run_status, exception_status;
 			char additional_data[256];
@@ -203,7 +204,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READCOILS:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -219,7 +220,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READDISCRETES:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -235,7 +236,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READINPUT:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -251,7 +252,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_READREGISTER:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) numregs = strtoul(save + 1, NULL, 10);
 			else numregs = 1;
@@ -267,7 +268,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITECOIL:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, NULL, 10);
 			else value = 0;
@@ -277,7 +278,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITEREGISTER:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, NULL, 16);
 			else value = 0;
@@ -287,7 +288,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITECOILS:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, &save, 10);
 			else value = 0;
@@ -302,7 +303,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case OPT_WRITEREGISTERS:
-			if (bus->serial == 0) goto bus_not_initialized;
+			if (bus->serial == -1) goto bus_not_initialized;
 			start = strtoul(optarg, &save, 10);
 			if (0 != *save) value = strtoul(save + 1, &save, 10);
 			else value = 0;
